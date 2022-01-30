@@ -1,0 +1,1442 @@
+<!doctype html>
+<html>
+<!--//////////////////////////////////////////////////////////-->
+<!--//////////////////////////////////////////////////////////-->
+<!--//////////     Space Snake by SifuF          /////////////-->
+<!--//////////////////////////////////////////////////////////-->
+<!--//////////////////////////////////////////////////////////-->
+<head>
+<title>SifuF's Homepage</title>
+<link rel="stylesheet" type="text/css" href="style1.css">
+<script type="text/javascript" src="glMatrix-0.9.5.min.js"></script>
+<script type="text/javascript" src="webgl-utils.js"></script>
+<!--//////////////////////////Shaders/////////////////////////////-->
+<script id="shader-vs" type="x-shader/x-vertex">
+    attribute vec3 aVertexPosition;
+    attribute vec4 aVertexColor;
+	uniform mat4 uMVMatrix;
+    uniform mat4 uPMatrix;
+	varying vec4 vColor;
+    void main(void) {
+        gl_Position = uPMatrix * uMVMatrix * vec4(aVertexPosition, 1.0);
+		vColor = aVertexColor;
+    }
+</script><script id="shader-fs" type="x-shader/x-fragment">
+    precision mediump float;
+    varying vec4 vColor;
+	void main(void) {
+        gl_FragColor = vColor;
+    }
+</script>
+<audio id="backMusic">
+  <source src="snake/snake.mp3" type="audio/mpeg" />
+  <source src="snake/snake.ogg" type="audio/ogg" />
+  Your browser does not support the audio element.
+</audio>
+<script type="text/javascript">
+//constants
+var DIR_LEFT = 1000;
+var DIR_RIGHT = 1001;
+var DIR_UP = 1002;
+var DIR_DOWN = 1003;
+var DIR_STOP = 1004;
+var MAX_SNAKES = 500;
+
+//WegGL setup
+var gl;
+var pMatrix = mat4.create();
+var mvMatrix = mat4.create();
+var mvMatrixStack = [];
+var shaderProgram;
+var frameUnit = 0.125;
+var loadedhighScore = 10;
+var bestPlayer = "SifuF";
+
+//buffers
+var arenaVertexColorBuffer;
+var arenaVertexPositionBuffer;
+var textBlockVertexColorBuffer;
+var textBlockRedVertexColorBuffer;
+var textBlockVertexPositionBuffer;
+var bodyVertexColorBuffer;
+var bodyVertexPositionBuffer;
+var headVertexColorBuffer;
+var headVertexPositionBuffer;
+var foodVertexColorBuffer;
+var foodYellowVertexColorBuffer;
+var foodVertexPositionBuffer;
+var note1VertexPositionBuffer;
+var note2VertexPositionBuffer;
+var rotAng = 0;
+
+//sphere
+var moonVertexPositionBuffer;
+var moonVertexColorBuffer;
+
+
+//Global variables
+var mySnake = new Array;
+for(var i=0; i<MAX_SNAKES; i++) {
+   mySnake[i]= new Snake(0.0, 0.0, 0.0, 0.0, 1.0, 1.0, 1.0);
+}
+var myFood = new Food(3.0, 2.0, 1.0, 0.0, 0.0);
+var initialOn = false;
+var arenaLength = 22.0;
+var arenaHeight = 10.0;
+var blockSize = 0.5;
+var cameraX = 0.0;
+var cameraY = 0.0;
+var cameraZ = -16.0;
+var rotation = false;
+var direction = DIR_STOP;
+var theta = 0.0;
+var gridRotationX = 0.0;
+var gridRotationY = 1.0;
+var gridRotationZ = 0.0;
+var activeSnakes = 20;
+var gameStarted = false;
+var gameCrashed = false;
+var foodActive = true;
+var growth = 10;
+var specialFood = false;
+var specialComing = false;
+var flashCounter = 0;
+var flashIterations = 2/frameUnit;
+var score = 0;
+var scoreUnit = 1;
+var score100 = 0;
+var score10 = 0;
+var score1 = 0;
+var highScore = 0;
+var highScore100 = 0;
+var highScore10 = 0;
+var highScore1 = 0;
+var backGround = true;
+var shipMoving = true;
+var shipCounter = 0;
+var shipCount = 10000;
+var songTitleXInit = -100;
+var songTitleX = songTitleXInit;
+var noteTheta = 0;
+var noteRotate = true;
+var songTitleCounter = 0;
+var songTitleDrawn = false;
+
+//text
+var textBlockSize = 0.5*blockSize;
+
+//planets
+var redPlanetX = 40;
+var redPlanetY = 20;
+var redPlanetZ = -30;
+
+//ships
+var ship1X = -50;
+var ship1Y = 6;
+var ship1Z = -10;
+
+//Title
+var titleScale = 150;
+var sifuR = 0.0;
+var sifuG = 0.0;
+var sifuB = 0.0;
+var startCounter = 0;
+var startR = 0.0;
+var startG = 0.0;
+var startB = 0.0;
+
+//File i/o
+var highScoreWritten = false;
+//fstream ioFile;
+
+//////////////Class definitions///////////////
+function Snake(startX, startY, startXPrev, startYPrev, startR, startG, startB) {
+   this.x = startX;
+   this.y = startY;
+   this.xPrev = startXPrev;
+   this.yPrev = startYPrev;
+   this.r = startR;
+   this.g = startG;
+   this.b = startB;
+}   
+
+function Food(startX, startY, startR, startG, startB) {
+   this.x = startX;
+   this.y = startY;
+   this.r = startR;
+   this.g = startG;
+   this.b = startB;
+}	
+
+////////////////functions/////////////////////
+function mvPushMatrix() {
+   var copy = mat4.create();
+   mat4.set(mvMatrix, copy);
+   mvMatrixStack.push(copy);
+}
+
+function mvPopMatrix() {
+   if (mvMatrixStack.length == 0) {
+      throw "Invalid popMatrix!";
+   }
+   mvMatrix = mvMatrixStack.pop();
+}
+
+function getShader(gl, id) {
+   var shaderScript = document.getElementById(id);
+   if (!shaderScript) {
+      return null;
+   }
+   var str = "";
+   var k = shaderScript.firstChild;
+   while(k) {
+      if(k.nodeType == 3) {
+         str += k.textContent;
+      }
+      k = k.nextSibling;
+   }
+   
+   var shader;
+   if(shaderScript.type == "x-shader/x-fragment") {
+      shader = gl.createShader(gl.FRAGMENT_SHADER);
+   } 
+   else if(shaderScript.type == "x-shader/x-vertex") {
+      shader = gl.createShader(gl.VERTEX_SHADER);
+   }
+   else {
+      return null;
+   }
+
+   gl.shaderSource(shader, str);
+   gl.compileShader(shader);
+   if(!gl.getShaderParameter(shader, gl.COMPILE_STATUS)) {
+      alert(gl.getShaderInfoLog(shader));
+      return null;
+   }
+   return shader;
+}
+
+
+function initShaders()   {
+   var vertexShader = getShader(gl, "shader-vs");
+   var fragmentShader = getShader(gl, "shader-fs");
+   shaderProgram = gl.createProgram();
+   gl.attachShader(shaderProgram, vertexShader);
+   gl.attachShader(shaderProgram, fragmentShader);
+   gl.linkProgram(shaderProgram);
+   gl.useProgram(shaderProgram);
+   
+   shaderProgram.vertexPositionAttribute = gl.getAttribLocation(shaderProgram, "aVertexPosition");
+   gl.enableVertexAttribArray(shaderProgram.vertexPositionAttribute);
+   
+   shaderProgram.vertexColorAttribute = gl.getAttribLocation(shaderProgram, "aVertexColor");
+   gl.enableVertexAttribArray(shaderProgram.vertexColorAttribute);
+   
+   shaderProgram.pMatrixUniform = gl.getUniformLocation(shaderProgram, "uPMatrix");
+   shaderProgram.mvMatrixUniform = gl.getUniformLocation(shaderProgram, "uMVMatrix");
+}
+
+function setMatrixUniforms() {
+   gl.uniformMatrix4fv(shaderProgram.pMatrixUniform, false, pMatrix);
+   gl.uniformMatrix4fv(shaderProgram.mvMatrixUniform, false, mvMatrix);
+}
+
+function initBuffers() {
+   arenaVertexPositionBuffer = gl.createBuffer();   //glNormal3f(0.0, 0.0, 1.0);
+   gl.bindBuffer(gl.ARRAY_BUFFER, arenaVertexPositionBuffer);
+   var vertices = [ 
+      -arenaLength/2, arenaHeight/2, 0.0,
+      -arenaLength/2, -arenaHeight/2, 0.0,
+      -arenaLength/2, -arenaHeight/2, 0.0,
+       arenaLength/2, -arenaHeight/2, 0.0,
+       arenaLength/2, -arenaHeight/2, 0.0,
+       arenaLength/2, arenaHeight/2, 0.0,
+       arenaLength/2, arenaHeight/2, 0.0,
+      -arenaLength/2, arenaHeight/2, 0.0
+   ];
+   gl.bufferData(gl.ARRAY_BUFFER, new Float32Array(vertices), gl.STATIC_DRAW);
+   arenaVertexPositionBuffer.itemSize = 3;
+   arenaVertexPositionBuffer.numItems = 8;
+   
+   arenaVertexColorBuffer = gl.createBuffer();
+   gl.bindBuffer(gl.ARRAY_BUFFER, arenaVertexColorBuffer);
+   var colors = [
+      1.0, 1.0, 1.0, 1.0,
+      1.0, 1.0, 1.0, 1.0,
+      1.0, 1.0, 1.0, 1.0,
+	  1.0, 1.0, 1.0, 1.0,
+	  1.0, 1.0, 1.0, 1.0,
+	  1.0, 1.0, 1.0, 1.0,
+	  1.0, 1.0, 1.0, 1.0,
+	  1.0, 1.0, 1.0, 1.0,
+   ];
+   gl.bufferData(gl.ARRAY_BUFFER, new Float32Array(colors), gl.STATIC_DRAW);
+   arenaVertexColorBuffer.itemSize = 4;
+   arenaVertexColorBuffer.numItems = 8;
+/////////////////////////////////////////////////////////////////////////////////////////// 
+   textBlockVertexPositionBuffer = gl.createBuffer();   //glNormal3f(0.0, 0.0, 1.0);
+   gl.bindBuffer(gl.ARRAY_BUFFER, textBlockVertexPositionBuffer);
+   var vertices = [ 
+      -textBlockSize/2, -textBlockSize/2, 0.0,
+      -textBlockSize/2, textBlockSize/2, 0.0,
+       textBlockSize/2, textBlockSize/2, 0.0,
+       textBlockSize/2, textBlockSize/2, 0.0,
+       textBlockSize/2, -textBlockSize/2, 0.0,
+       -textBlockSize/2, -textBlockSize/2, 0.0
+   ];
+   gl.bufferData(gl.ARRAY_BUFFER, new Float32Array(vertices), gl.STATIC_DRAW);
+   textBlockVertexPositionBuffer.itemSize = 3;
+   textBlockVertexPositionBuffer.numItems = 6;
+   
+   textBlockVertexColorBuffer = gl.createBuffer();
+   gl.bindBuffer(gl.ARRAY_BUFFER, textBlockVertexColorBuffer);
+   var colors = [
+      1.0, 1.0, 1.0, 1.0,
+      1.0, 1.0, 1.0, 1.0,
+      1.0, 1.0, 1.0, 1.0,
+	  1.0, 1.0, 1.0, 1.0,
+	  1.0, 1.0, 1.0, 1.0,
+	  1.0, 1.0, 1.0, 1.0,
+   ];
+   gl.bufferData(gl.ARRAY_BUFFER, new Float32Array(colors), gl.STATIC_DRAW);
+   textBlockVertexColorBuffer.itemSize = 4;
+   textBlockVertexColorBuffer.numItems = 6;  
+   
+   textBlockRedVertexColorBuffer = gl.createBuffer();
+   gl.bindBuffer(gl.ARRAY_BUFFER, textBlockRedVertexColorBuffer);
+   var colors = [
+      1.0, 0.0, 0.0, 1.0,
+      1.0, 0.0, 0.0, 1.0,
+      1.0, 0.0, 0.0, 1.0,
+	  1.0, 0.0, 0.0, 1.0,
+	  1.0, 0.0, 0.0, 1.0,
+	  1.0, 0.0, 0.0, 1.0,
+   ];
+   gl.bufferData(gl.ARRAY_BUFFER, new Float32Array(colors), gl.STATIC_DRAW);
+   textBlockRedVertexColorBuffer.itemSize = 4;
+   textBlockRedVertexColorBuffer.numItems = 6;  
+ ///////////////////////////////////////////////////////////////////////////////////////////    
+   bodyVertexPositionBuffer = gl.createBuffer();   //glNormal3f(0.0, 0.0, 1.0);
+   gl.bindBuffer(gl.ARRAY_BUFFER, bodyVertexPositionBuffer);
+   var vertices = [ 
+      -blockSize/2, -blockSize/2, 0.0,
+      -blockSize/2, blockSize/2, 0.0,
+       blockSize/2, blockSize/2, 0.0,
+       blockSize/2, blockSize/2, 0.0,
+       blockSize/2, -blockSize/2, 0.0,
+      -blockSize/2, -blockSize/2, 0.0
+   ];
+   gl.bufferData(gl.ARRAY_BUFFER, new Float32Array(vertices), gl.STATIC_DRAW);
+   bodyVertexPositionBuffer.itemSize = 3;
+   bodyVertexPositionBuffer.numItems = 6;
+   
+   bodyVertexColorBuffer = gl.createBuffer();
+   gl.bindBuffer(gl.ARRAY_BUFFER, bodyVertexColorBuffer);
+   var colors = [
+      1.0, 1.0, 1.0, 1.0,
+      1.0, 1.0, 1.0, 1.0,
+      1.0, 1.0, 1.0, 1.0,
+	  1.0, 1.0, 1.0, 1.0,
+	  1.0, 1.0, 1.0, 1.0,
+	  1.0, 1.0, 1.0, 1.0,
+   ];
+   gl.bufferData(gl.ARRAY_BUFFER, new Float32Array(colors), gl.STATIC_DRAW);
+   bodyVertexColorBuffer.itemSize = 4;
+   bodyVertexColorBuffer.numItems = 6;  
+ ///////////////////////////////////////////////////////////////////////////////////////////  
+  headVertexPositionBuffer = gl.createBuffer();   //glNormal3f(0.0, 0.0, 1.0);
+   gl.bindBuffer(gl.ARRAY_BUFFER, headVertexPositionBuffer);
+   var vertices = [ 
+      -blockSize/2, -blockSize/2, 0.0,
+      -blockSize/2, blockSize/2, 0.0,
+       blockSize/2, blockSize/2, 0.0,
+       blockSize/2, blockSize/2, 0.0,
+       blockSize/2, -blockSize/2, 0.0,
+      -blockSize/2, -blockSize/2, 0.0
+   ];
+   gl.bufferData(gl.ARRAY_BUFFER, new Float32Array(vertices), gl.STATIC_DRAW);
+   headVertexPositionBuffer.itemSize = 3;
+   headVertexPositionBuffer.numItems = 6;
+   
+   headVertexColorBuffer = gl.createBuffer();
+   gl.bindBuffer(gl.ARRAY_BUFFER, headVertexColorBuffer);
+   var colors = [
+      1.0, 1.0, 1.0, 1.0,
+      1.0, 1.0, 1.0, 1.0,
+      1.0, 1.0, 1.0, 1.0,
+	  1.0, 1.0, 1.0, 1.0,
+	  1.0, 1.0, 1.0, 1.0,
+	  1.0, 1.0, 1.0, 1.0,
+   ];
+   gl.bufferData(gl.ARRAY_BUFFER, new Float32Array(colors), gl.STATIC_DRAW);
+   headVertexColorBuffer.itemSize = 4;
+   headVertexColorBuffer.numItems = 6;  
+ //////////////////////////////////////////////////////  
+   foodVertexPositionBuffer = gl.createBuffer();   //glNormal3f(0.0, 0.0, 1.0);
+   gl.bindBuffer(gl.ARRAY_BUFFER, foodVertexPositionBuffer);
+   var vertices = [ 
+      -blockSize/2, -blockSize/2, 0.0,
+      -blockSize/2, blockSize/2, 0.0,
+       blockSize/2, blockSize/2, 0.0,
+       blockSize/2, blockSize/2, 0.0,
+       blockSize/2, -blockSize/2, 0.0,
+      -blockSize/2, -blockSize/2, 0.0
+   ];
+   gl.bufferData(gl.ARRAY_BUFFER, new Float32Array(vertices), gl.STATIC_DRAW);
+   foodVertexPositionBuffer.itemSize = 3;
+   foodVertexPositionBuffer.numItems = 6;
+   
+   foodVertexColorBuffer = gl.createBuffer();
+   gl.bindBuffer(gl.ARRAY_BUFFER, foodVertexColorBuffer);
+   var colors = [
+      1.0, 0.0, 0.0, 1.0,
+      1.0, 0.0, 0.0, 1.0,
+      1.0, 0.0, 0.0, 1.0,
+	  1.0, 0.0, 0.0, 1.0,
+	  1.0, 0.0, 0.0, 1.0,
+	  1.0, 0.0, 0.0, 1.0
+   ];
+   gl.bufferData(gl.ARRAY_BUFFER, new Float32Array(colors), gl.STATIC_DRAW);
+   foodVertexColorBuffer.itemSize = 4;
+   foodVertexColorBuffer.numItems = 6; 
+   
+   foodYellowVertexColorBuffer = gl.createBuffer();
+   gl.bindBuffer(gl.ARRAY_BUFFER, foodYellowVertexColorBuffer);
+   var colors = [
+      1.0, 1.0, 0.0, 1.0,
+      1.0, 1.0, 0.0, 1.0,
+      1.0, 1.0, 0.0, 1.0,
+	  1.0, 1.0, 0.0, 1.0,
+	  1.0, 1.0, 0.0, 1.0,
+	  1.0, 1.0, 0.0, 1.0
+   ];
+   gl.bufferData(gl.ARRAY_BUFFER, new Float32Array(colors), gl.STATIC_DRAW);
+   foodYellowVertexColorBuffer.itemSize = 4;
+   foodYellowVertexColorBuffer.numItems = 6; 
+//////////////////////////////////////////////////////
+note1VertexPositionBuffer = gl.createBuffer();
+   gl.bindBuffer(gl.ARRAY_BUFFER, note1VertexPositionBuffer);
+   var vertices = [];
+   vertices[0]=0.0;
+   vertices[1]=0.0;
+   vertices[2]=0.0;
+   var r = 0.4*blockSize;
+   var alpha = 0;
+   var i=3;
+   var N=10;
+   while(alpha<2*Math.PI+1)   {
+      vertices[i] = r*Math.cos(alpha);
+	  vertices[i+1] = r*Math.sin(alpha);
+	  vertices[i+2] = 0.0;
+	  alpha += 2*Math.PI/N;
+	  i+=3; 
+	}
+   gl.bufferData(gl.ARRAY_BUFFER, new Float32Array(vertices), gl.STATIC_DRAW);
+   note1VertexPositionBuffer.itemSize = 3;
+   note1VertexPositionBuffer.numItems = N+2;
+   
+   note1VertexColorBuffer = gl.createBuffer();
+   gl.bindBuffer(gl.ARRAY_BUFFER, note1VertexColorBuffer);
+   var colors = [
+      1.0, 1.0, 1.0, 1.0,
+	  1.0, 1.0, 1.0, 1.0,
+	  1.0, 1.0, 1.0, 1.0,
+	  1.0, 1.0, 1.0, 1.0,
+	  1.0, 1.0, 1.0, 1.0,
+	  1.0, 1.0, 1.0, 1.0,
+	  1.0, 1.0, 1.0, 1.0,
+	  1.0, 1.0, 1.0, 1.0,
+	  1.0, 1.0, 1.0, 1.0,
+	  1.0, 1.0, 1.0, 1.0,
+	  1.0, 1.0, 1.0, 1.0,
+	  1.0, 1.0, 1.0, 1.0,
+	  1.0, 1.0, 1.0, 1.0,
+	  1.0, 1.0, 1.0, 1.0,
+	  1.0, 1.0, 1.0, 1.0,
+	  1.0, 1.0, 1.0, 1.0,
+	  1.0, 1.0, 1.0, 1.0,
+	  1.0, 1.0, 1.0, 1.0,
+	  1.0, 1.0, 1.0, 1.0,
+	  1.0, 1.0, 1.0, 1.0,
+	  1.0, 1.0, 1.0, 1.0,
+	  1.0, 1.0, 1.0, 1.0,
+	  1.0, 1.0, 1.0, 1.0,
+	  1.0, 1.0, 1.0, 1.0,
+   ];
+   gl.bufferData(gl.ARRAY_BUFFER, new Float32Array(colors), gl.STATIC_DRAW);
+   note1VertexColorBuffer.itemSize = 4;
+   note1VertexColorBuffer.numItems = N+2
+   ; 
+//////////////////////////////////////////////////////
+   note2VertexPositionBuffer = gl.createBuffer();   //glNormal3f(0.0, 0.0, 1.0);
+   gl.bindBuffer(gl.ARRAY_BUFFER, note2VertexPositionBuffer);
+   var r = 0.4*blockSize;
+   var corX = 3.0*r;
+   var corY = 1.1*r;
+   var vertices = [ 
+      2*r/3 - r/3, 0.0, 0.0, 
+	  2*r/3 + r/3, 0.0, 0.0,
+	  2*r/3 + r/3, 4*r, 0.0, 
+	  2*r/3 + r/3, 4*r, 0.0, 
+	  2*r/3 -r/3, 4*r, 0.0, 
+	  2*r/3 -r/3, 0.0, 0.0,
+	  2*r/3 -r/3, 4*r, 0.0, 
+	  4*r, 4*r + r + r/3, 0.0, 
+	  2*r/3 -r/3, 4*r - r/2, 0.0, 
+	  2*r/3 -r/3, 4*r - r/2, 0.0,
+	  4*r, 4*r + r + r/3, 0.0,
+	  4*r, 4*r + r + r/3 - 0.5*r, 0.0,
+	  2*r/3 -r/3, 4*r, 0.0,
+	  4*r, 4*r + r + r/3, 0.0,
+	  2*r/3 -r/3, 4*r - r/2, 0.0,
+	  2*r/3 -r/3, 4*r - r/2, 0.0,
+	  4*r, 4*r + r + r/3, 0.0,
+	  4*r, 4*r + r + r/3 - 0.5*r, 0.0,
+      2*r/3 - r/3 + corX, 0.0 + corY, 0.0, 
+	  2*r/3 + r/3 + corX, 0.0 + corY, 0.0,
+	  2*r/3 + r/3 + corX, 4*r + corY, 0.0,
+	  2*r/3 + r/3 + corX, 4*r + corY, 0.0,
+      2*r/3 -r/3 + corX, 4*r + corY, 0.0,
+	  2*r/3 -r/3 + corX, 0.0 + corY, 0.0 
+   ];
+   gl.bufferData(gl.ARRAY_BUFFER, new Float32Array(vertices), gl.STATIC_DRAW);
+   note2VertexPositionBuffer.itemSize = 3;
+   note2VertexPositionBuffer.numItems = 24;
+   
+   note2VertexColorBuffer = gl.createBuffer();
+   gl.bindBuffer(gl.ARRAY_BUFFER, note2VertexColorBuffer);
+   var colors = [
+      1.0, 1.0, 1.0, 1.0,
+	  1.0, 1.0, 1.0, 1.0,
+	  1.0, 1.0, 1.0, 1.0,
+	  1.0, 1.0, 1.0, 1.0,
+	  1.0, 1.0, 1.0, 1.0,
+	  1.0, 1.0, 1.0, 1.0,
+	  1.0, 1.0, 1.0, 1.0,
+	  1.0, 1.0, 1.0, 1.0,
+	  1.0, 1.0, 1.0, 1.0,
+	  1.0, 1.0, 1.0, 1.0,
+	  1.0, 1.0, 1.0, 1.0,
+	  1.0, 1.0, 1.0, 1.0,
+	  1.0, 1.0, 1.0, 1.0,
+	  1.0, 1.0, 1.0, 1.0,
+	  1.0, 1.0, 1.0, 1.0,
+	  1.0, 1.0, 1.0, 1.0,
+	  1.0, 1.0, 1.0, 1.0,
+	  1.0, 1.0, 1.0, 1.0,
+	  1.0, 1.0, 1.0, 1.0,
+	  1.0, 1.0, 1.0, 1.0,
+	  1.0, 1.0, 1.0, 1.0,
+	  1.0, 1.0, 1.0, 1.0,
+	  1.0, 1.0, 1.0, 1.0,
+	  1.0, 1.0, 1.0, 1.0,
+   ];
+   gl.bufferData(gl.ARRAY_BUFFER, new Float32Array(colors), gl.STATIC_DRAW);
+   note2VertexColorBuffer.itemSize = 4;
+   note2VertexColorBuffer.numItems = 24; 
+//////////////////////////////////////////////////////
+////////////////////////Sphere//////////////////////// 
+        var latitudeBands = 30;
+        var longitudeBands = 30;
+        var radius = 12;
+
+        var vertexPositionData = [];
+		var vertexColorData = [];
+        for (var latNumber=0; latNumber <= latitudeBands; latNumber++) {
+            var theta = latNumber * Math.PI / latitudeBands;
+            var sinTheta = Math.sin(theta);
+            var cosTheta = Math.cos(theta);
+
+            for (var longNumber=0; longNumber <= longitudeBands; longNumber++) {
+                var phi = longNumber * 2 * Math.PI / longitudeBands;
+                var sinPhi = Math.sin(phi);
+                var cosPhi = Math.cos(phi);
+
+                var x = cosPhi * sinTheta;
+                var y = cosTheta;
+                var z = sinPhi * sinTheta;
+                var u = 1 - (longNumber / longitudeBands);
+                var v = 1 - (latNumber / latitudeBands);
+				
+                vertexPositionData.push(radius * x);
+                vertexPositionData.push(radius * y);
+                vertexPositionData.push(radius * z);
+				vertexColorData.push(1.0);
+				vertexColorData.push(1.0);
+				vertexColorData.push(1.0);
+				vertexColorData.push(1.0);
+            }
+        }
+		
+		moonVertexPositionBuffer = gl.createBuffer();
+        gl.bindBuffer(gl.ARRAY_BUFFER, moonVertexPositionBuffer);
+        gl.bufferData(gl.ARRAY_BUFFER, new Float32Array(vertexPositionData), gl.STATIC_DRAW);
+        moonVertexPositionBuffer.itemSize = 3;
+        moonVertexPositionBuffer.numItems = vertexPositionData.length / 3;
+		
+	    moonVertexColorBuffer = gl.createBuffer();
+        gl.bindBuffer(gl.ARRAY_BUFFER, moonVertexColorBuffer);
+        gl.bufferData(gl.ARRAY_BUFFER, new Float32Array(vertexColorData), gl.STATIC_DRAW);
+        moonVertexColorBuffer.itemSize = 4;
+        moonVertexColorBuffer.numItems = vertexColorData.length / 4;
+
+		//////////////////////////////////////////////////////
+
+}
+
+function setMatrixUniforms() {
+   gl.uniformMatrix4fv(shaderProgram.pMatrixUniform, false, pMatrix);
+   gl.uniformMatrix4fv(shaderProgram.mvMatrixUniform, false, mvMatrix);
+}
+//////////////////////////////////////////////////////
+function setCamera()   {
+   mat4.translate(mvMatrix, [ cameraX, cameraY, cameraZ ] );
+}
+
+function degToRad(ang) {
+   return (ang*Math.PI/180);
+}
+
+
+function drawSphere(r, slice, sub) {
+   mvPushMatrix();
+   mat4.translate(mvMatrix, [ -15.0, -3.0, 0 ] );
+   mat4.rotate(mvMatrix, rotAng, [ 0.0, 0.0, 1.0 ] );
+   gl.bindBuffer(gl.ARRAY_BUFFER, moonVertexPositionBuffer);
+   gl.vertexAttribPointer(shaderProgram.vertexPositionAttribute, moonVertexPositionBuffer.itemSize, gl.FLOAT, false, 0, 0);
+   gl.bindBuffer(gl.ARRAY_BUFFER, moonVertexColorBuffer);
+   gl.vertexAttribPointer(shaderProgram.vertexColorAttribute, moonVertexColorBuffer.itemSize, gl.FLOAT, false, 0, 0);
+   setMatrixUniforms();
+   gl.drawArrays(gl.TRIANGLE_STRIP, 0, moonVertexPositionBuffer.numItems);
+   mvPopMatrix();
+   rotAng+=0.001;
+   if(rotAng>100000) {
+      rotAng = 0;
+   }
+}
+
+function drawShip() {
+   mvPushMatrix();
+   mat4.scale(mvMatrix, [5.0, 5.0, 5.0]);
+   drawTextBlock();
+   mvPopMatrix();
+}
+
+function drawBackground()   {
+   if( !backGround ) return;	
+   mvPushMatrix(); //red planet
+   mat4.translate(mvMatrix, [ redPlanetX, redPlanetY, redPlanetZ ] );
+   drawSphere(15.0, 50, 50);
+   mvPopMatrix();
+   redPlanetX -= 0.01;
+   if(redPlanetX < -80) {
+      redPlanetX = 80;
+   }
+   if( !shipMoving ) {   //ship logic
+      if(shipCounter != shipCount )   {
+	     shipCounter++;
+	     return;
+	  }
+      else {
+         shipMoving = true;
+	  }
+   }
+   mvPushMatrix();   //ship
+   mat4.translate(mvMatrix, [ ship1X, ship1Y, ship1Z ] );
+   mat4.rotate(mvMatrix, degToRad(-95), [0.0, 0.0, 1.0]); 
+   mat4.rotate(mvMatrix, degToRad(-30), [0.0, 1.0, 0.0]); 
+   drawShip();
+   mvPopMatrix();
+   ship1X += frameUnit;
+   ship1Y -= frameUnit/10;
+   ship1Z += frameUnit/10;
+   if(ship1X > 35) { 
+      ship1X = -40;
+	  ship1Y = 6;
+      ship1Z = -10;
+	  shipMoving = false;
+	  shipCounter = 0;
+   }
+}
+
+function rotationLogic() {
+   if(!specialFood) { 
+      rotation = false;
+	  return;
+   }
+   else { 
+      rotation = true;
+   }
+}
+
+function rotateGameGrid()   {
+   if(!rotation) {
+      return;
+   }
+   mat4.rotate(mvMatrix, degToRad(theta), [gridRotationX, gridRotationY, gridRotationZ]);
+   theta += 7.5*frameUnit;
+}
+
+function randomNumber() {
+   var rnd = Math.floor(Math.random()*10000);
+   return rnd;
+}
+
+function rotationRandomizer() {
+   if(rotation) {
+      return;
+   }
+   switch( randomNumber()%3 ) {
+      case 0: gridRotationX = 1.0; gridRotationY = 0.0; gridRotationZ = 0.0; break;
+	  case 1: gridRotationX = 0.0; gridRotationY = 1.0; gridRotationZ = 0.0; break;
+	  case 2: gridRotationX = 0.0; gridRotationY = 0.0; gridRotationZ = 1.0; break;
+   }
+}
+
+function drawArena()   {
+   gl.bindBuffer(gl.ARRAY_BUFFER, arenaVertexPositionBuffer);
+   gl.vertexAttribPointer(shaderProgram.vertexPositionAttribute, arenaVertexPositionBuffer.itemSize, gl.FLOAT, false, 0, 0);
+   gl.bindBuffer(gl.ARRAY_BUFFER, arenaVertexColorBuffer);
+   gl.vertexAttribPointer(shaderProgram.vertexColorAttribute, arenaVertexColorBuffer.itemSize, gl.FLOAT, false, 0, 0);
+   setMatrixUniforms();
+   gl.drawArrays(gl.LINES, 0, arenaVertexPositionBuffer.numItems);
+}
+
+function drawTextBlock()   {
+   gl.bindBuffer(gl.ARRAY_BUFFER, textBlockVertexPositionBuffer);
+   gl.vertexAttribPointer(shaderProgram.vertexPositionAttribute, textBlockVertexPositionBuffer.itemSize, gl.FLOAT, false, 0, 0);
+   gl.bindBuffer(gl.ARRAY_BUFFER, textBlockVertexColorBuffer);
+   gl.vertexAttribPointer(shaderProgram.vertexColorAttribute, textBlockVertexColorBuffer.itemSize, gl.FLOAT, false, 0, 0);
+   setMatrixUniforms();
+   gl.drawArrays(gl.TRIANGLES, 0, textBlockVertexPositionBuffer.numItems);
+}
+
+function drawNote()   {
+   var r = 0.4*blockSize;
+   mvPushMatrix();
+   mat4.translate( mvMatrix, [ 1.5*r, 0.0, 0.0 ] );
+   mat4.rotate( mvMatrix, degToRad(noteTheta), [ 0.0, 1.0, 0.0 ] );
+   mat4.translate( mvMatrix, [ -1.5*r, 0.0, 0.0 ] );
+   noteTheta+=3;
+   gl.bindBuffer(gl.ARRAY_BUFFER, note2VertexPositionBuffer);
+   gl.vertexAttribPointer(shaderProgram.vertexPositionAttribute, note2VertexPositionBuffer.itemSize, gl.FLOAT, false, 0, 0);
+   gl.bindBuffer(gl.ARRAY_BUFFER, note2VertexColorBuffer);
+   gl.vertexAttribPointer(shaderProgram.vertexColorAttribute, note2VertexColorBuffer.itemSize, gl.FLOAT, false, 0, 0);
+   setMatrixUniforms();
+   gl.drawArrays(gl.TRIANGLES, 0, note2VertexPositionBuffer.numItems);
+	
+   gl.bindBuffer(gl.ARRAY_BUFFER, note1VertexPositionBuffer);
+   gl.vertexAttribPointer(shaderProgram.vertexPositionAttribute, note1VertexPositionBuffer.itemSize, gl.FLOAT, false, 0, 0);
+   gl.bindBuffer(gl.ARRAY_BUFFER, note1VertexColorBuffer);
+   gl.vertexAttribPointer(shaderProgram.vertexColorAttribute, note1VertexColorBuffer.itemSize, gl.FLOAT, false, 0, 0);
+   setMatrixUniforms();
+   gl.drawArrays(gl.TRIANGLE_FAN, 0, note1VertexPositionBuffer.numItems);
+    
+   mat4.translate( mvMatrix, [ 3*r, r, 0.0 ] );
+   gl.bindBuffer(gl.ARRAY_BUFFER, note1VertexPositionBuffer);
+   gl.vertexAttribPointer(shaderProgram.vertexPositionAttribute, note1VertexPositionBuffer.itemSize, gl.FLOAT, false, 0, 0);
+   gl.bindBuffer(gl.ARRAY_BUFFER, note1VertexColorBuffer);
+   gl.vertexAttribPointer(shaderProgram.vertexColorAttribute, note1VertexColorBuffer.itemSize, gl.FLOAT, false, 0, 0);
+   setMatrixUniforms();
+   gl.drawArrays(gl.TRIANGLE_FAN, 0, note1VertexPositionBuffer.numItems);
+   mvPopMatrix();		
+	
+}
+
+function drawSongTitle()   {
+   if(songTitleDrawn) {
+      return;
+   }
+   mvPushMatrix();
+   mat4.translate(mvMatrix, [songTitleX, 0.0, 0.0]);
+   var tempTextBlockSize = textBlockSize;
+   textBlockSize = textBlockSize/1.5;
+   mat4.translate(mvMatrix, [-arenaLength/2 + 1.5*textBlockSize, -arenaHeight/2 - 10*textBlockSize, 0.0]);
+   drawNote();
+   mat4.translate(mvMatrix, [12*textBlockSize, 2*textBlockSize, 0.0]);
+   drawLetter('k');
+   mat4.translate(mvMatrix, [4*textBlockSize, 0.0, 0.0]);
+   drawLetter('a');
+   mvPushMatrix();
+   mat4.translate(mvMatrix, [5*textBlockSize, textBlockSize, 0.0]);
+   mat4.rotate(mvMatrix, degToRad(90), [0.0, 0.0, 1.0]);
+   drawLetter('m');
+   mat4.translate(mvMatrix, [-3*textBlockSize, 0.0, 0.0]);
+   drawLetter('<');
+   mvPopMatrix();
+   mat4.translate(mvMatrix, [8*textBlockSize, 0.0, 0.0]);
+   drawLetter('I');
+   mat4.translate(mvMatrix, [4*textBlockSize, 0.0, 0.0]);
+   mat4.translate(mvMatrix, [4*textBlockSize, 0.0, 0.0]);
+   drawLetter('-');
+   mat4.translate(mvMatrix, [4*textBlockSize, 0.0, 0.0]);
+   mat4.translate(mvMatrix, [4*textBlockSize, 0.0, 0.0]);
+   drawLetter('a');
+   mat4.translate(mvMatrix, [4*textBlockSize, 0.0, 0.0]);
+   drawLetter('D');
+   mat4.translate(mvMatrix, [4*textBlockSize, 0.0, 0.0]);
+   drawNumber(0);
+   mat4.translate(mvMatrix, [4*textBlockSize, 0.0, 0.0]);
+   drawLetter('n');
+   mat4.translate(mvMatrix, [2*textBlockSize, 0.0, 0.0]);
+   drawLetter('I');
+   mat4.translate(mvMatrix, [4*textBlockSize, 0.0, 0.0]);
+   drawLetter('s');
+   mat4.translate(mvMatrix, [10*textBlockSize, -2*textBlockSize, 0.0]);
+   drawNote();
+   mvPopMatrix();
+   textBlockSize = tempTextBlockSize;
+   if( songTitleX > 12 ) {
+      songTitleCounter++;
+	  if( songTitleCounter < 40/frameUnit ) {    
+	     return;
+      }
+   }
+   if( songTitleX > 40) {
+      songTitleX = songTitleXInit;
+	  songTitleDrawn = true;
+   }
+   songTitleX += 5*frameUnit;
+}
+
+function drawText( pos )   {
+//  1  2  3
+//  4  5  6 
+//  7  8  9 	
+// 10 11 12	
+// 13 14 15	
+
+   mvPushMatrix();
+   switch(pos)   {
+      case 1:  mat4.translate(mvMatrix, [ -textBlockSize, 2*textBlockSize, 0.0 ] );     drawTextBlock();   break;
+	  case 2:  mat4.translate(mvMatrix, [ 0.0, 2*textBlockSize, 0.0 ] );			  	  drawTextBlock();   break;
+      case 3:  mat4.translate(mvMatrix, [ textBlockSize, 2*textBlockSize, 0.0 ] );	  drawTextBlock();   break;
+	  case 4:  mat4.translate(mvMatrix, [ -textBlockSize, textBlockSize, 0.0 ] );       drawTextBlock();   break;
+   	  case 5:  mat4.translate(mvMatrix, [ 0.0, textBlockSize, 0.0 ] );				  drawTextBlock();   break;
+      case 6:  mat4.translate(mvMatrix, [ textBlockSize, textBlockSize, 0.0 ] );	      drawTextBlock();   break;
+	  case 7:  mat4.translate(mvMatrix, [ -textBlockSize, 0.0, 0.0 ] );				  drawTextBlock();   break;
+	  case 8:  mat4.translate(mvMatrix, [ 0.0, 0.0, 0.0 ] );						      drawTextBlock();   break;
+	  case 9:  mat4.translate(mvMatrix, [ textBlockSize, 0.0, 0.0 ] );			      drawTextBlock();   break;
+	  case 10: mat4.translate(mvMatrix, [ -textBlockSize, -textBlockSize, 0.0 ] );	  drawTextBlock();   break;
+      case 11: mat4.translate(mvMatrix, [ 0.0, -textBlockSize, 0.0 ] );			      drawTextBlock();   break;
+      case 12: mat4.translate(mvMatrix, [ textBlockSize, -textBlockSize, 0.0 ] );	      drawTextBlock();   break;
+      case 13: mat4.translate(mvMatrix, [ -textBlockSize, -2*textBlockSize, 0.0 ] );    drawTextBlock();   break;
+	  case 14: mat4.translate(mvMatrix, [ 0.0, -2*textBlockSize, 0.0 ] );		          drawTextBlock();   break;
+      case 15: mat4.translate(mvMatrix, [ textBlockSize, -2*textBlockSize, 0.0 ] );     drawTextBlock();   break;
+	  default: break;
+	}
+	mvPopMatrix();
+}
+
+function drawNumber( number )   {
+   mvPushMatrix();
+   switch(number)   {
+      case 1: drawText(3); drawText(6); drawText(9); drawText(12); drawText(15); break;
+	  case 2: drawText(1); drawText(2); drawText(3); drawText(6); drawText(7); drawText(8); drawText(9); drawText(10); drawText(13); drawText(14); drawText(15); break;
+	  case 3: drawText(1); drawText(2); drawText(3); drawText(6); drawText(7); drawText(8); drawText(9); drawText(12); drawText(13); drawText(14); drawText(15); break;
+	  case 4: drawText(1); drawText(3); drawText(4); drawText(6); drawText(7); drawText(8); drawText(9); drawText(12); drawText(15); break;
+      case 5: drawText(1); drawText(2); drawText(3); drawText(4); drawText(7); drawText(8); drawText(9); drawText(12); drawText(13); drawText(14); drawText(15); break;
+	  case 6: drawText(1); drawText(2); drawText(3); drawText(4); drawText(7); drawText(8); drawText(9); drawText(10); drawText(12); drawText(13); drawText(14); drawText(15); break;
+	  case 7: drawText(1); drawText(2); drawText(3); drawText(6); drawText(9); drawText(12); drawText(15); break;
+	  case 8: drawText(1); drawText(2); drawText(3); drawText(4); drawText(6); drawText(7); drawText(8); drawText(9); drawText(10); drawText(12); drawText(13); drawText(14); drawText(15); break;
+	  case 9: drawText(1); drawText(2); drawText(3); drawText(4); drawText(6); drawText(7); drawText(8); drawText(9); drawText(12); drawText(15); break;
+      case 0: drawText(1); drawText(2); drawText(3); drawText(4); drawText(6); drawText(7);  drawText(9); drawText(10); drawText(12); drawText(13); drawText(14); drawText(15); break;
+	  default: break;
+   }
+   mvPopMatrix();    
+}
+
+function drawLetter( letter )   {
+   mvPushMatrix();
+   switch(letter)   {
+      case 'a': drawText(1); drawText(2); drawText(3); drawText(4); drawText(6); drawText(7);drawText(8); drawText(9); drawText(10); drawText(12); drawText(13); drawText(15); break;
+	  case 'd': drawText(3); drawText(6); drawText(7); drawText(8); drawText(9); drawText(10); drawText(12); drawText(13); drawText(14); drawText(14); drawText(15); break;
+	  case 'o': drawText(7); drawText(8); drawText(9); drawText(10); drawText(12); drawText(13); drawText(14); drawText(15); break;
+	  case 'n': drawText(7); drawText(1); drawText(2); drawText(3); drawText(4); drawText(6); drawText(9); drawText(10); drawText(12); drawText(13); drawText(15); break;
+      case 'i': drawText(3); drawText(9); drawText(12); drawText(15); break;
+	  case 'I': drawText(3); drawText(6); drawText(9); drawText(12); drawText(15); break;
+	  case 's': drawText(1); drawText(2); drawText(3); drawText(4); drawText(7); drawText(8); drawText(9); drawText(12); drawText(13); drawText(14); drawText(15); break;
+	  case '-': drawText(7); drawText(8); drawText(9); break;
+   	  case 'k': drawText(1); drawText(3); drawText(4); drawText(6); drawText(7); drawText(8); drawText(10); drawText(11); drawText(12); drawText(5); drawText(13); drawText(15); break;
+	  case 'm': drawText(3); drawText(15); drawText(1); drawText(2); drawText(5); drawText(6); drawText(7); drawText(8); drawText(11); drawText(12); drawText(13); drawText(14); break;
+	  case 'f': drawText(1); drawText(2); drawText(3); drawText(4); drawText(7); drawText(8); drawText(9); drawText(10); drawText(13); break;
+	  case 'u': drawText(1); drawText(3); drawText(4); drawText(6); drawText(7); drawText(9); drawText(10); drawText(12); drawText(13); drawText(14); drawText(15); break;
+	  case 'b': drawText(1); drawText(2); drawText(3); drawText(6); drawText(9); drawText(4); drawText(7); drawText(8); drawText(9); drawText(10); drawText(12); drawText(13); drawText(14); drawText(14); drawText(15); break;
+      case 'y': drawText(1); drawText(3); drawText(4); drawText(6); drawText(7); drawText(8); drawText(9); drawText(12); drawText(13); drawText(14); drawText(15); break;
+	  case 'p': drawText(1); drawText(2); drawText(3); drawText(4); drawText(6); drawText(7);drawText(8); drawText(9); drawText(10); drawText(13); break;
+	  case 'c': drawText(1); drawText(2); drawText(3); drawText(4); drawText(7); drawText(10); drawText(13); drawText(14); drawText(15); break;
+	  case 'e': drawText(1); drawText(2); drawText(3); drawText(4); drawText(7); drawText(8); drawText(9); drawText(10); drawText(13); drawText(14); drawText(15); break;
+	  case 'D': drawText(1); drawText(2); drawText(4); drawText(6); drawText(7);  drawText(9); drawText(10); drawText(12); drawText(13); drawText(14);  break;
+	  case '<': drawText(2); drawText(3); drawText(14); drawText(15); break;
+	  case 't': drawText(1); drawText(2); drawText(3); drawText(5); drawText(8);  drawText(11); drawText(14);  break;
+	  case 'r': drawText(1); drawText(2); drawText(3); drawText(4); drawText(7);  drawText(10); drawText(13);  break;
+	  default: break;
+   }
+   mvPopMatrix();    
+}
+
+function updateScore()   {
+   if( score > highScore ) {
+		highScore = score;
+   }
+   score1 = Math.floor(score%10);
+   score10 = Math.floor((score/10)%10);
+   score100 = Math.floor((score/100)%10);
+   highScore1 = Math.floor(highScore%10);
+   highScore10 = Math.floor((highScore/10)%10);
+   highScore100 = Math.floor((highScore/100)%10);
+   }
+
+function drawScore()   {
+   mvPushMatrix();
+   mat4.translate(mvMatrix, [ -arenaLength/2 + 1.5*textBlockSize, arenaHeight/2 + 3.5*textBlockSize, 0.0 ]);
+   drawNumber(score100);
+   mat4.translate(mvMatrix, [ 4*textBlockSize, 0.0, 0.0] );
+   drawNumber(score10);
+   mat4.translate(mvMatrix, [ 4*textBlockSize, 0.0, 0.0]);
+   drawNumber(score1);
+   mvPopMatrix();
+}
+
+function drawHighScore() {
+   mvPushMatrix();
+   if( highScore >= score ) {
+      mat4.translate(mvMatrix, [ arenaLength/2 - 9.5*textBlockSize, arenaHeight/2 + 3.5*textBlockSize, 0.0 ] );
+      drawNumber(highScore100);
+      mat4.translate(mvMatrix, [ 4*textBlockSize, 0.0, 0.0] );
+      drawNumber(highScore10);
+      mat4.translate(mvMatrix, [ 4*textBlockSize, 0.0, 0.0 ]);
+      drawNumber(highScore1);
+   }
+   else {
+      mat4.translate(mvMatrix, [ arenaLength/2 - 9.5*textBlockSize, arenaHeight/2 + 3.5*textBlockSize, 0.0 ] );
+      drawNumber(score100);
+      mat4.translate(mvMatrix, [ 4*textBlockSize, 0.0, 0.0 ]);
+      drawNumber(score10);
+      mat4.translate(mvMatrix, [ 4*textBlockSize, 0.0, 0.0 ]);
+      drawNumber(score1);
+   }
+   mvPopMatrix();
+}
+
+function bodyLogic()   {
+   var i = 0;
+   while( i < activeSnakes ) {
+      mySnake[i+1].x = ( mySnake[i].xPrev );
+	  mySnake[i+1].y = ( mySnake[i].yPrev );
+	  i++;
+   }
+}
+
+function drawBody()   {
+   var i = 1;
+   while( i < activeSnakes ) {
+      mvPushMatrix();
+      mat4.translate(mvMatrix, [ mySnake[i].x, mySnake[i].y, 0.0 ] );
+	  gl.bindBuffer(gl.ARRAY_BUFFER, bodyVertexPositionBuffer);
+      gl.vertexAttribPointer(shaderProgram.vertexPositionAttribute, bodyVertexPositionBuffer.itemSize, gl.FLOAT, false, 0, 0);
+      gl.bindBuffer(gl.ARRAY_BUFFER, bodyVertexColorBuffer);
+      gl.vertexAttribPointer(shaderProgram.vertexColorAttribute, bodyVertexColorBuffer.itemSize, gl.FLOAT, false, 0, 0);
+      setMatrixUniforms();
+      gl.drawArrays(gl.TRIANGLES, 0, bodyVertexPositionBuffer.numItems);
+	  mvPopMatrix();
+      i++;
+   }
+}
+
+function headLogic() {
+   switch(direction) {
+      case DIR_LEFT:   mySnake[0].x = ( mySnake[0].x - frameUnit);   break;
+	  case DIR_RIGHT:   mySnake[0].x = ( mySnake[0].x + frameUnit); break;
+	  case DIR_UP:   mySnake[0].y = ( mySnake[0].y + frameUnit); break;
+	  case DIR_DOWN:   mySnake[0].y = ( mySnake[0].y - frameUnit); break;
+	  default: break;
+   }
+}
+
+function drawHead()   {
+   mvPushMatrix();
+   mat4.translate(mvMatrix, [mySnake[0].x, mySnake[0].y, 0.0 ] );
+   gl.bindBuffer(gl.ARRAY_BUFFER, headVertexPositionBuffer);
+   gl.vertexAttribPointer(shaderProgram.vertexPositionAttribute, headVertexPositionBuffer.itemSize, gl.FLOAT, false, 0, 0);
+   gl.bindBuffer(gl.ARRAY_BUFFER, headVertexColorBuffer);
+   gl.vertexAttribPointer(shaderProgram.vertexColorAttribute, headVertexColorBuffer.itemSize, gl.FLOAT, false, 0, 0);
+   setMatrixUniforms();
+   gl.drawArrays(gl.TRIANGLES, 0, headVertexPositionBuffer.numItems);
+   mvPopMatrix();
+}
+
+function updateHead()   {
+   mySnake[0].xPrev = ( mySnake[0].x );
+   mySnake[0].yPrev = ( mySnake[0].y );
+}
+
+function updateBody()   {
+   var i = 1;
+   while(i < activeSnakes ) {
+      mySnake[i].xPrev = ( mySnake[i].x );
+      mySnake[i].yPrev = ( mySnake[i].y );
+      i++;
+   }
+}
+
+function snakeColor() {
+   //glColor3f( mySnake[0].r, mySnake[0].g, mySnake[0].b );
+}
+
+function boundsCheck()   {
+   if(Math.abs( mySnake[0].x ) >= (arenaLength/2 - blockSize/2) && direction == DIR_LEFT) {
+      mySnake[0].x = (arenaLength/2 - blockSize/2);
+   }
+   if(Math.abs( mySnake[0].x ) >= (arenaLength/2 - blockSize/2) && direction == DIR_RIGHT) {
+      mySnake[0].x = (-arenaLength/2 + blockSize/2);
+   }
+   if(Math.abs( mySnake[0].y ) >= (arenaHeight/2- blockSize/2) && direction == DIR_UP) {
+      mySnake[0].y = (-arenaHeight/2 + blockSize/2);
+   }
+   if(Math.abs( mySnake[0].y ) >= (arenaHeight/2 - blockSize/2) && direction == DIR_DOWN) {
+      mySnake[0].y = (arenaHeight/2 - blockSize/2);
+   }
+}
+
+function foodCheck() {
+   if(!foodActive) {   
+      return;
+   }
+   if( ( Math.abs(mySnake[0].x - myFood.x) ) < 0.5 && ( Math.abs(mySnake[0].y - myFood.y ) ) < 0.5 ) {
+      foodActive = false;
+	  foodSet();
+	  growSnake();
+	  theta = 0.0;
+   }
+}
+
+function foodLogic() {
+   if(!foodActive) {   
+      return;
+   }
+   if(specialComing && specialFood) {
+      specialComing = false;
+   }
+}
+function foodSet() {
+   if(specialFood) {
+      specialFood = false;
+   }
+   if(specialComing) {
+      myFood.x = ( randomNumber()%( arenaLength - blockSize/2 ) - ( arenaLength/2 - blockSize/2 ) );
+      myFood.y = ( randomNumber()%( arenaHeight - blockSize/2 ) - ( arenaHeight/2 - blockSize/2 ) );
+      myFood.r = 1.0;
+      myFood.g = 0.0;
+      myFood.b = 0.0;
+      specialFood = true;
+      score += 10*scoreUnit;
+   }
+   else if(randomNumber()%6 == 0) {
+      myFood.x = ( randomNumber()%( arenaLength - blockSize/2 ) - ( arenaLength/2 - blockSize/2 ) );
+	  myFood.y = ( randomNumber()%( arenaHeight - blockSize/2 ) - ( arenaHeight/2 - blockSize/2 ) );
+	  myFood.r = 1.0;
+      myFood.g = 1.0;
+      myFood.b = 0.0;
+	  specialComing = true;
+	  score += scoreUnit;
+   }
+   else {
+      myFood.x = ( randomNumber()%( arenaLength - blockSize/2 ) - ( arenaLength/2 - blockSize/2 ) );
+	  myFood.y = ( randomNumber()%( arenaHeight - blockSize/2 ) - ( arenaHeight/2 - blockSize/2 ) );
+	  myFood.r = 1.0;
+      myFood.g = 0.0;
+      myFood.b = 0.0;
+	  specialFood = false;
+	  score += scoreUnit;
+   }
+}
+
+function drawFood()   {
+   if(!foodActive) {   
+      return;
+   }
+   mvPushMatrix();
+   mat4.translate(mvMatrix, [ myFood.x, myFood.y, 0.0 ] );
+   gl.bindBuffer(gl.ARRAY_BUFFER, foodVertexPositionBuffer);
+   gl.vertexAttribPointer(shaderProgram.vertexPositionAttribute, foodVertexPositionBuffer.itemSize, gl.FLOAT, false, 0, 0);
+   if(myFood.g>0.5) {
+      gl.bindBuffer(gl.ARRAY_BUFFER, foodYellowVertexColorBuffer);
+      gl.vertexAttribPointer(shaderProgram.vertexColorAttribute, foodYellowVertexColorBuffer.itemSize, gl.FLOAT, false, 0, 0);
+   }
+   else {
+      gl.bindBuffer(gl.ARRAY_BUFFER, foodVertexColorBuffer);
+      gl.vertexAttribPointer(shaderProgram.vertexColorAttribute, foodVertexColorBuffer.itemSize, gl.FLOAT, false, 0, 0);
+   }
+   setMatrixUniforms();
+   gl.drawArrays(gl.TRIANGLES, 0, foodVertexPositionBuffer.numItems);
+   mvPopMatrix();
+}
+
+function drawTitle()   {
+   var tempColorBuffer = textBlockVertexColorBuffer;
+   textBlockVertexColorBuffer = textBlockRedVertexColorBuffer;
+   var tempTextBlockSize = textBlockSize;
+   textBlockSize = 1.5*tempTextBlockSize;
+   mvPushMatrix();
+   mat4.translate(mvMatrix, [ -10*textBlockSize, 0.0, 0.0  ] );
+   mat4.scale(mvMatrix, [ titleScale, titleScale, 1.0 ] );
+   mat4.translate(mvMatrix, [ -10*textBlockSize, 0.0, 0.0 ] );
+   drawLetter('s');
+   mat4.translate(mvMatrix, [ 4*textBlockSize, 0.0, 0.0 ] );
+   drawLetter('p');
+   mat4.translate(mvMatrix, [ 4*textBlockSize, 0.0, 0.0 ] );
+   drawLetter('a');
+   mat4.translate(mvMatrix, [ 4*textBlockSize, 0.0, 0.0 ] );
+   drawLetter('c');
+   mat4.translate(mvMatrix, [ 4*textBlockSize, 0.0, 0.0 ] );
+   drawLetter('e');
+   mat4.translate(mvMatrix, [ 4*textBlockSize, 0.0, 0.0 ] );
+   mat4.translate(mvMatrix, [ 4*textBlockSize, 0.0, 0.0 ] );
+   drawLetter('s');
+   mat4.translate(mvMatrix, [ 4*textBlockSize, 0.0, 0.0 ] );
+   drawLetter('n');
+   mat4.translate(mvMatrix, [ 4*textBlockSize, 0.0, 0.0 ] );
+   drawLetter('a');
+   mat4.translate(mvMatrix, [ 4*textBlockSize, 0.0, 0.0 ] );
+   drawLetter('k');
+   mat4.translate(mvMatrix, [ 4*textBlockSize, 0.0, 0.0 ] );
+   drawLetter('e');
+   mvPopMatrix();
+   mvPushMatrix();
+   textBlockVertexColorBuffer = tempColorBuffer;
+   textBlockSize = tempTextBlockSize/1.5;
+   mat4.translate(mvMatrix, [ -arenaLength/2 + 1.5*textBlockSize , arenaHeight/2 + 4.5*textBlockSize, 0.0 ] );
+   //glColor3f( sifuR, sifuG, sifuB);
+   drawLetter('s');
+   mat4.translate(mvMatrix, [ 2*textBlockSize, 0.0, 0.0 ] );
+   drawLetter('I');
+   mat4.translate(mvMatrix, [ 4*textBlockSize, 0.0, 0.0 ] );
+   drawLetter('f');
+   mat4.translate(mvMatrix, [ 4*textBlockSize, 0.0, 0.0 ] );
+   drawLetter('u');
+   mat4.translate(mvMatrix, [ 6*textBlockSize, 0.0, 0.0 ] );
+   drawLetter('f');
+   mat4.translate(mvMatrix, [ 6*textBlockSize, 0.0, 0.0 ] );
+   drawLetter('p');
+   mat4.translate(mvMatrix, [ 4*textBlockSize, 0.0, 0.0 ] );
+   drawLetter('r');
+   mat4.translate(mvMatrix, [ 4*textBlockSize, 0.0, 0.0 ] );
+   drawLetter('e');
+   mat4.translate(mvMatrix, [ 4*textBlockSize, 0.0, 0.0 ] );
+   drawLetter('s');
+   mat4.translate(mvMatrix, [ 4*textBlockSize, 0.0, 0.0 ] );
+   drawLetter('e');
+   mat4.translate(mvMatrix, [ 4*textBlockSize, 0.0, 0.0 ] );
+   drawLetter('n');
+   mat4.translate(mvMatrix, [ 4*textBlockSize, 0.0, 0.0 ] );
+   drawLetter('t');
+   mat4.translate(mvMatrix, [ 4*textBlockSize, 0.0, 0.0 ] );
+   drawLetter('s');
+   mvPopMatrix();
+   textBlockSize = tempTextBlockSize;
+
+   if(titleScale > 1) {
+      titleScale-=15*frameUnit;
+   }
+   
+   else {
+      titleScale=1;
+	  sifuR+=0.01;
+      sifuG+=0.01;
+	  sifuB+=0.01;
+         if(sifuR >= 1.0) {
+	        sifuR = 1.0;
+	        sifuG = 1.0;
+	        sifuB = 1.0;
+	     }
+   }
+
+}
+
+function tailCheck()   {
+   var i = 20;
+   while( i < activeSnakes )   {
+      if( ( Math.abs(mySnake[0].x - mySnake[i].x) ) < 0.001 && ( Math.abs(mySnake[0].y - mySnake[i].y ) ) < 0.001 )   {
+	     gameCrashed = true; 
+	     gameStarted = false;
+         foodActive = true;
+         specialFood = false;
+         specialComing = false;
+	     rotation = false;
+	  }
+   i++;
+   }
+}
+
+function growSnake()   {
+   if(activeSnakes == MAX_SNAKES) { 
+      return;
+   }	  
+   var i = activeSnakes;   //draw correction
+   while( i < ( activeSnakes + growth - 1) ) {
+	   mySnake[i].x = ( mySnake[activeSnakes-1].x );
+	   mySnake[i].y = ( mySnake[activeSnakes-1].y );
+	   mySnake[i].xPrev = ( mySnake[activeSnakes-1].x );
+	   mySnake[i].yPrev = ( mySnake[activeSnakes-1].y );
+	   i++;
+   }
+   activeSnakes = activeSnakes + growth;
+   foodActive = true;
+}
+
+function enterToStart()   {
+   var tempTextBlockSize = textBlockSize;
+   textBlockSize = tempTextBlockSize;
+   mvPushMatrix();
+   mat4.translate(mvMatrix, [ -10*textBlockSize, -2.0, 0.0 ]);
+   drawLetter('p');
+   mat4.translate(mvMatrix, [ 4*textBlockSize, 0.0, 0.0 ]);
+   drawLetter('r');
+   mat4.translate(mvMatrix, [ 4*textBlockSize, 0.0, 0.0 ]);
+   drawLetter('e');
+   mat4.translate(mvMatrix, [ 4*textBlockSize, 0.0, 0.0] );
+   drawLetter('s');
+   mat4.translate(mvMatrix, [ 4*textBlockSize, 0.0, 0.0 ]);
+   drawLetter('s');
+   mat4.translate(mvMatrix, [ 4*textBlockSize, 0.0, 0.0 ]);
+   mat4.translate(mvMatrix, [ 4*textBlockSize, 0.0, 0.0 ]);
+   drawLetter('e');
+   mat4.translate(mvMatrix, [ 4*textBlockSize, 0.0, 0.0 ]);
+   drawLetter('n');
+   mat4.translate(mvMatrix, [ 4*textBlockSize, 0.0, 0.0 ]);
+   drawLetter('t');
+   mat4.translate(mvMatrix, [ 4*textBlockSize, 0.0, 0.0 ]);
+   drawLetter('e');
+   mat4.translate(mvMatrix, [ 4*textBlockSize, 0.0, 0.0 ]);
+   drawLetter('r');
+   mvPopMatrix();	
+}
+
+function gameMode()   {
+   drawBackground();   //draw non-moving global parts
+   drawSongTitle();
+   rotationRandomizer();   //apply local transformations
+   rotationLogic();
+   rotateGameGrid();
+   drawArena();   //draw moving parts
+   updateScore();
+   drawScore();
+   drawHighScore();
+   headLogic();   //draw snake
+   drawHead();
+   updateHead();
+   bodyLogic();
+   drawBody();
+   updateBody();
+   foodLogic();   //draw food
+   drawFood();
+   boundsCheck();   //collision detection
+   tailCheck();
+   foodCheck();
+}
+
+function intro()   {
+   drawBackground();   //draw non-moving global parts    
+   drawTitle();
+
+   if( startCounter > 20/frameUnit )   {
+      mvPushMatrix();
+      //glColor3f(startR, startG, startB );
+      mat4.translate(mvMatrix, [8.0, -5.0, 0.0 ] );
+      enterToStart();
+      mvPopMatrix();
+      startR += 0.01;
+      startG += 0.01;
+      startB += 0.01;
+}
+startCounter++;
+if( (startR >= 1.0) || (startG >= 1.0 ) || ( startB >= 1.0 ) )   {
+   startR = 0.0;
+   startG = 0.0;
+   startB = 0.0;
+}
+rotateGameGrid();//apply local transformations
+drawArena();//draw moving parts
+}
+
+function crashMode()   {
+   mvPushMatrix();   //draw non-moving global parts
+   mat4.translate(mvMatrix, [ 12.0, -7.0, 10] );
+   enterToStart();
+   mvPopMatrix();
+   rotateGameGrid();   //apply local transformations
+   mat4.rotate(mvMatrix, degToRad(-theta), [gridRotationX, gridRotationY, gridRotationZ]);
+   cameraZ = cameraZ - 2*frameUnit;
+
+   if(cameraZ < -30 ) {
+      cameraZ=-30;
+   }
+   drawArena();//draw moving parts
+   updateScore();
+
+   if( flashCounter < flashIterations )   {   //draw snake in crashed position
+      drawHead();
+      drawBody();
+      drawScore();
+      drawHighScore();
+   }
+   flashCounter++;
+
+   if(highScore != score) {
+      drawHighScore();
+   }
+   if(flashCounter > 2*flashIterations ) {
+      flashCounter = 0;
+   }
+   if(!highScoreWritten)   {
+      loadedHiScore = highScore;
+      highScoreWritten = true;
+	  if(highScore == score) {
+	     bestPlayer = prompt("You got the Hi Score!!! Please enter your name","SifuF");
+		 if(bestPlayer == null) {
+		   bestPlayer = "unknown!";
+		 }
+	  }
+   }
+}
+
+function reset()   {
+   var i = 0;
+   while( i < activeSnakes )   {
+      mySnake[i].x = (0.0);
+      mySnake[i].y = (0.0);
+      mySnake[i].xPrev = (0.0);
+	  mySnake[i].yPrev = (0.0);
+	  i++;
+   }
+   activeSnakes = 20;
+   direction = DIR_STOP;
+   rotation = false;
+   gameStarted = true;
+   gameCrashed = false;
+   foodActive = true;
+   specialFood = false;
+   specialComing = false;
+   myFood.r = 1.0;
+   myFood.g = 0.0;
+   myFood.b = 0.0;
+   cameraZ = -15.0;
+   score = 0;
+   songTitleDrawn = false;
+   songTitleX = songTitleXInit;
+   songTitleCounter = 0;
+   highScoreWritten = false;
+   if(!initialOn)   {
+      initialOn = true;
+	  document.getElementById('backMusic').play();
+   }
+}
+
+function renderScene() {
+   gl.viewport(0, 0, gl.viewportWidth, gl.viewportHeight);
+   gl.clear(gl.COLOR_BUFFER_BIT | gl.DEPTH_BUFFER_BIT);
+   mat4.perspective(60, gl.viewportWidth / gl.viewportHeight, 0.1, 100.0, pMatrix);
+   mat4.identity(mvMatrix);
+   setCamera();
+ 
+   if(gameStarted) {
+      gameMode();
+   }
+   else if(gameCrashed) {
+      crashMode();
+   }
+   else {	
+      intro();
+   }
+}
+
+
+   
+function keyCallbacks()   {
+document.onkeydown = function(evt) {
+   evt = evt || window.event;
+   if (evt.keyCode == 39) {
+      if( direction == DIR_LEFT ) {}		 
+	  else { direction = DIR_RIGHT;}
+   }
+    if (evt.keyCode == 37) {
+      if( direction == DIR_RIGHT ) {}		 
+	  else { direction = DIR_LEFT;}
+   }
+    if (evt.keyCode == 38) {
+      if( direction == DIR_DOWN ) {}		 
+	  else { direction = DIR_UP;}
+   }
+    if (evt.keyCode == 40) {
+      if( direction == DIR_UP ) {}		 
+	  else { direction = DIR_DOWN;}
+   }
+   if (evt.keyCode == 13) {
+      if( gameStarted ) {}		 
+	  else { gameStarted = !gameStarted; reset();}
+   }
+ }   
+}   
+   
+function initialise() {
+   keyCallbacks();
+   initShaders();
+   initBuffers();
+   gl.clearColor(0.0, 0.0, 0.0, 1.0);
+   gl.enable(gl.DEPTH_TEST);
+   highScore = loadedhighScore;
+}
+
+function tick() {
+   requestAnimFrame(tick);
+   renderScene();
+   poll();
+}   
+
+function beginWebGL() {
+   var c = document.getElementById("glWindow");
+   gl = c.getContext("experimental-webgl");
+   gl.viewportWidth = c.width;
+   gl.viewportHeight = c.height;
+   initialise(); 
+   tick();
+}
+
+function poll() {
+   
+}
+
+function testFunc() {
+   //gameStarted = !gameStarted;
+   //document.getElementById('backMusic').pause();
+   //highScore = loadedhighScore;
+   alert(bestPlayer+" leads with "+highScore+" points!! ....Can you get more?");
+}
+
+function testFunc2() {
+   //gameStarted = !gameStarted;
+   //document.getElementById('backMusic').pause();
+   //highScore = loadedhighScore;
+   bestPlayer=prompt("You got the Hi Score!!! Please enter your name","SifuF");
+}
+
+</script>
+</head><body onload="beginWebGL();">
+<!--//////////////////////////////////////////////////////////////-->
+<!--//////////////////////////////////////////////////////////////-->
+<div class="outerWrapper">
+   <div class="main">
+      <a href="index.html"><img src="SifuF.png" width="1000px"></a>
+      <div class="intro"></div>
+	  <div class="intro"><canvas id="glWindow" width="720" height="400" style="border:2px solid #000000;"></canvas></div>
+      <div class="intro"><button type="button" onclick="testFunc()">Current Best Player</button></canvas></div>
+   </div>
+</div>
+<!--//////////////////////////////////////////////////////////////-->
+<!--//////////////////////////////////////////////////////////////-->
+<!--//////////////////////////////////////////////////////////////-->
+<!--//////////////////////////////////////////////////////////////-->
+
+
+</body></html>
