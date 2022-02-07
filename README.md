@@ -15,6 +15,6 @@ Red food = 1 point
 
 Yellow food = 10 points
 
-Music by KAMI
-
 **Try to beat the high score!**
+
+Music by KAMI
