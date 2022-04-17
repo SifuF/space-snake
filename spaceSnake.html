@@ -28,7 +28,7 @@
         gl_FragColor = vColor;
     }
 </script>
-<audio id="backMusic">
+<audio id="backMusic" controls loop>
   <source src="snake/snake.mp3" type="audio/mpeg" />
   <source src="snake/snake.ogg" type="audio/ogg" />
   Your browser does not support the audio element.
@@ -58,6 +58,8 @@ var arenaVertexPositionBuffer;
 var textBlockVertexColorBuffer;
 var textBlockRedVertexColorBuffer;
 var textBlockVertexPositionBuffer;
+var textBlockShipVertexPositionBuffer;
+var textBlockShipVertexColorBuffer;
 var bodyVertexColorBuffer;
 var bodyVertexPositionBuffer;
 var headVertexColorBuffer;
@@ -72,6 +74,7 @@ var rotAng = 0;
 //sphere
 var moonVertexPositionBuffer;
 var moonVertexColorBuffer;
+var moonElementBuffer;
 
 
 //Global variables
@@ -102,7 +105,7 @@ var specialFood = false;
 var specialComing = false;
 var flashCounter = 0;
 var flashIterations = 2/frameUnit;
-var score = 0;
+var score = 11;
 var scoreUnit = 1;
 var score100 = 0;
 var score10 = 0;
@@ -315,7 +318,37 @@ function initBuffers() {
    gl.bufferData(gl.ARRAY_BUFFER, new Float32Array(colors), gl.STATIC_DRAW);
    textBlockRedVertexColorBuffer.itemSize = 4;
    textBlockRedVertexColorBuffer.numItems = 6;  
- ///////////////////////////////////////////////////////////////////////////////////////////    
+ ///////////////////////////////////////////////////////////////////////////////////////////
+//////////////////ship
+   textBlockShipVertexPositionBuffer = gl.createBuffer();   //glNormal3f(0.0, 0.0, 1.0);
+   gl.bindBuffer(gl.ARRAY_BUFFER, textBlockShipVertexPositionBuffer);
+   var vertices = [ 
+      -textBlockSize/2, -textBlockSize/2, 0.0,
+      -textBlockSize/2, textBlockSize/2, 0.0,
+       textBlockSize/2, textBlockSize/2, 0.0,
+       textBlockSize/2, textBlockSize/2, 0.0,
+       textBlockSize/2, -textBlockSize/2, 0.0,
+       -textBlockSize/2, -textBlockSize/2, 0.0
+   ];
+   gl.bufferData(gl.ARRAY_BUFFER, new Float32Array(vertices), gl.STATIC_DRAW);
+   textBlockShipVertexPositionBuffer.itemSize = 3;
+   textBlockShipVertexPositionBuffer.numItems = 6;
+   
+   textBlockShipVertexColorBuffer = gl.createBuffer();
+   gl.bindBuffer(gl.ARRAY_BUFFER, textBlockShipVertexColorBuffer);
+   var colors = [
+      1.0, 0.0, 0.0, 1.0,
+      1.0, 1.0, 0.0, 1.0,
+      0.0, 0.0, 1.0, 1.0,
+	  0.0, 0.0, 1.0, 1.0,
+	  0.0, 1.0, 0.0, 1.0,
+	  1.0, 0.0, 0.0, 1.0,
+   ];
+   gl.bufferData(gl.ARRAY_BUFFER, new Float32Array(colors), gl.STATIC_DRAW);
+   textBlockShipVertexColorBuffer.itemSize = 4;
+   textBlockShipVertexColorBuffer.numItems = 6;  
+    
+ ///////////////////////////////////////////////////////////////////////////////////////////     
    bodyVertexPositionBuffer = gl.createBuffer();   //glNormal3f(0.0, 0.0, 1.0);
    gl.bindBuffer(gl.ARRAY_BUFFER, bodyVertexPositionBuffer);
    var vertices = [ 
@@ -536,8 +569,8 @@ note1VertexPositionBuffer = gl.createBuffer();
    note2VertexColorBuffer.numItems = 24; 
 //////////////////////////////////////////////////////
 ////////////////////////Sphere//////////////////////// 
-        var latitudeBands = 30;
-        var longitudeBands = 30;
+        var latitudeBands = 100;
+        var longitudeBands = 100;
         var radius = 12;
 
         var vertexPositionData = [];
@@ -561,9 +594,9 @@ note1VertexPositionBuffer = gl.createBuffer();
                 vertexPositionData.push(radius * x);
                 vertexPositionData.push(radius * y);
                 vertexPositionData.push(radius * z);
-				vertexColorData.push(1.0);
-				vertexColorData.push(1.0);
-				vertexColorData.push(1.0);
+				vertexColorData.push(Math.random());
+				vertexColorData.push(Math.random());
+				vertexColorData.push(Math.random());
 				vertexColorData.push(1.0);
             }
         }
@@ -579,6 +612,44 @@ note1VertexPositionBuffer = gl.createBuffer();
         gl.bufferData(gl.ARRAY_BUFFER, new Float32Array(vertexColorData), gl.STATIC_DRAW);
         moonVertexColorBuffer.itemSize = 4;
         moonVertexColorBuffer.numItems = vertexColorData.length / 4;
+		
+		
+		var n = latitudeBands;
+		var m = longitudeBands;
+		var sizeInd = 6 * (n+1) * m;
+		
+		var points = sizeInd;
+		var indices = [];
+		var k = 0;
+		for (var j = 0; j < m; j++) {
+			for (var i = 0; i < n-1; i++) {
+				
+				indices[k] = i + (j + 1) * n;
+				indices[k+1] = i + j * n;
+				indices[k+2] = i + 1 + (j + 1) * n;
+
+				indices[k+3] = i + j * n;
+				indices[k+4] = i + 1 + j * n;
+				indices[k+5] = i + 1 + (j + 1) * n;
+
+				k += 6;
+			}
+
+		indices[k] = n-1 + (j + 1) * n;
+		indices[k + 1] = n-1 + j * n;
+		indices[k + 2] = (j+1)*n;
+
+		indices[k + 3] = n-1 + j * n;
+		indices[k + 4] = j * n;
+		indices[k + 5] = (j + 1)* n;
+
+		k += 6;
+		}
+		
+		moonElementBuffer = gl.createBuffer();
+		gl.bindBuffer(gl.GL_ELEMENT_ARRAY_BUFFER, moonElementBuffer);
+		gl.bufferData(gl.ELEMENT_ARRAY_BUFFER, new Uint16Array(indices), gl.STATIC_DRAW);
+	
 
 		//////////////////////////////////////////////////////
 
@@ -607,7 +678,16 @@ function drawSphere(r, slice, sub) {
    gl.bindBuffer(gl.ARRAY_BUFFER, moonVertexColorBuffer);
    gl.vertexAttribPointer(shaderProgram.vertexColorAttribute, moonVertexColorBuffer.itemSize, gl.FLOAT, false, 0, 0);
    setMatrixUniforms();
-   gl.drawArrays(gl.TRIANGLE_STRIP, 0, moonVertexPositionBuffer.numItems);
+   
+   gl.drawArrays(gl.LINES, 0, moonVertexPositionBuffer.numItems);
+   
+   //gl.bindBuffer(gl.ELEMENT_ARRAY_BUFFER, moonElementBuffer);
+   //var primitiveType = gl.TRIANGLES;
+   //var offset = 0;
+   //var count = 600;
+   //var indexType = gl.UNSIGNED_SHORT;
+   //gl.drawElements(primitiveType, count, indexType, offset);
+   
    mvPopMatrix();
    rotAng+=0.001;
    if(rotAng>100000) {
@@ -618,7 +698,7 @@ function drawSphere(r, slice, sub) {
 function drawShip() {
    mvPushMatrix();
    mat4.scale(mvMatrix, [5.0, 5.0, 5.0]);
-   drawTextBlock();
+   drawShipTextBlock();
    mvPopMatrix();
 }
 
@@ -679,6 +759,10 @@ function rotateGameGrid()   {
 
 function randomNumber() {
    var rnd = Math.floor(Math.random()*10000);
+   
+   if(rnd==0) {
+	return 1;
+   }
    return rnd;
 }
 
@@ -709,6 +793,15 @@ function drawTextBlock()   {
    gl.vertexAttribPointer(shaderProgram.vertexColorAttribute, textBlockVertexColorBuffer.itemSize, gl.FLOAT, false, 0, 0);
    setMatrixUniforms();
    gl.drawArrays(gl.TRIANGLES, 0, textBlockVertexPositionBuffer.numItems);
+}
+
+function drawShipTextBlock()   {
+   gl.bindBuffer(gl.ARRAY_BUFFER, textBlockShipVertexPositionBuffer);
+   gl.vertexAttribPointer(shaderProgram.vertexPositionAttribute, textBlockShipVertexPositionBuffer.itemSize, gl.FLOAT, false, 0, 0);
+   gl.bindBuffer(gl.ARRAY_BUFFER, textBlockShipVertexColorBuffer);
+   gl.vertexAttribPointer(shaderProgram.vertexColorAttribute, textBlockShipVertexColorBuffer.itemSize, gl.FLOAT, false, 0, 0);
+   setMatrixUniforms();
+   gl.drawArrays(gl.TRIANGLES, 0, textBlockShipVertexPositionBuffer.numItems);
 }
 
 function drawNote()   {
