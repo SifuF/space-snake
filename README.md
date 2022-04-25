@@ -2,9 +2,11 @@
 
 Snake game with an interesting twist. WebGL JavaScript version featuring music by KAMI.
 
-#### Click on the pic below to play it in your browser:
+#### [Click here to play it in your browser:](http://sifuf.com/spaceSnake.html)
 
-<div class="intro"><a href="http://sifuf.com/spaceSnake.html"><img src="http://sifuf.com/programming/thumbs/snake0.jpg" style="width: 700px;" /></a></div>
+
+
+<div class="intro"><a href="http://sifuf.com/spaceSnake.html"><img src="img/rotateZ.gif"/></a></div>
 </br>
 
 
@@ -21,8 +23,8 @@ Yellow food = 10 points
 ```
 **Try to beat the high score!**
 
-![alt text](img/rotateX.gif)
+<div class="intro"><a href="http://sifuf.com/spaceSnake.html"><img src="img/snake0.jpg" style="width: 700px;" /></a></div>
+</br>
 
-![alt text](img/rotateY.gif)
-
-![alt text](img/rotateZ.gif)
+<div class="intro"><a href="http://sifuf.com/spaceSnake.html"><img src="img/rotateX.gif" style="width: 700px;" /></a></div>
+</br>
